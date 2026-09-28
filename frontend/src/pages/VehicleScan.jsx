@@ -15,6 +15,7 @@ function VehicleScan() {
   const [vehicleType, setVehicleType] = useState("CAR");
 
   const [cameraStarted, setCameraStarted] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -27,36 +28,52 @@ function VehicleScan() {
     };
   }, [stream]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!stream || !cameraStarted || !video) return undefined;
+
+    video.srcObject = stream;
+    video.play().catch((playError) => {
+      console.error("Camera preview error:", playError);
+      setError("The camera opened, but its preview could not start. Please try again.");
+    });
+
+    return () => {
+      if (video.srcObject === stream) video.srcObject = null;
+    };
+  }, [stream, cameraStarted]);
+
   const startCamera = async () => {
     setError("");
     setSuccess("");
 
     try {
-      if (!navigator.mediaDevices) {
-        setError("Camera is not supported by this browser.");
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError("Camera access is not available. Open this page in a supported browser over HTTPS.");
         return;
       }
 
       const mediaStream =
         await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "environment"
+            facingMode: { ideal: "environment" }
           },
           audio: false
         });
 
       setStream(mediaStream);
+      setCameraReady(false);
       setCameraStarted(true);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
     } catch (error) {
       console.error("Camera error:", error);
 
-      setError(
-        "Unable to access camera. Please allow camera permission."
-      );
+      if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+        setError("Camera permission is blocked. Allow camera access for this site in your browser settings, then try again.");
+      } else if (error.name === "NotFoundError") {
+        setError("No camera was found on this device.");
+      } else {
+        setError("Unable to start the camera. Check that no other app is using it, then try again.");
+      }
     }
   };
 
@@ -69,6 +86,7 @@ function VehicleScan() {
 
     setStream(null);
     setCameraStarted(false);
+    setCameraReady(false);
   };
 
   const captureImage = async () => {
@@ -81,6 +99,11 @@ function VehicleScan() {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+
+    if (!video.videoWidth || !video.videoHeight) {
+      setError("The camera is still starting. Please wait a moment and try again.");
+      return;
+    }
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -291,6 +314,8 @@ function VehicleScan() {
                     autoPlay
                     playsInline
                     muted
+                    onPlaying={() => setCameraReady(true)}
+                    onWaiting={() => setCameraReady(false)}
                     className="w-full h-full object-cover"
                   />
                 )}
@@ -352,12 +377,10 @@ function VehicleScan() {
                   <>
                     <button
                       onClick={captureImage}
-                      disabled={scanning}
+                      disabled={scanning || !cameraReady}
                       className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-3 rounded-lg transition"
                     >
-                      {scanning
-                        ? "Scanning..."
-                        : "Capture & Scan"}
+                      {scanning ? "Scanning..." : cameraReady ? "Capture & Scan" : "Starting camera..."}
                     </button>
 
                     <button
