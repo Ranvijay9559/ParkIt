@@ -23,6 +23,18 @@ app.use(cors());
 // small default JSON body limit.
 app.use(express.json({ limit: "5mb" }));
 
+// Vercel invokes this exported Express app per request. Connect lazily so each
+// function instance is ready before a route tries to use MongoDB.
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error("MongoDB connection failed:", error.message);
+    res.status(503).json({ message: "Database unavailable. Please try again." });
+  }
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/vehicles", vehicleRoutes);
 app.use("/api/parking", parkingRoutes);
@@ -39,21 +51,28 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST", "PATCH"]
-  }
-});
-setSocketServer(io);
 
-connectDB()
-  .then(() => {
-    server.listen(PORT, () => {
-      console.log(`ParkIt backend running on port ${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error("ParkIt backend failed to start:", error.message);
-    process.exit(1);
+// Vercel needs the Express application exported from its entry file. Keep the
+// HTTP and Socket.IO listener for local development.
+module.exports = app;
+
+if (require.main === module) {
+  const io = new Server(server, {
+    cors: {
+      origin: process.env.FRONTEND_URL || "http://localhost:5173",
+      methods: ["GET", "POST", "PATCH"]
+    }
   });
+  setSocketServer(io);
+
+  connectDB()
+    .then(() => {
+      server.listen(PORT, () => {
+        console.log(`ParkIt backend running on port ${PORT}`);
+      });
+    })
+    .catch((error) => {
+      console.error("ParkIt backend failed to start:", error.message);
+      process.exit(1);
+    });
+}
