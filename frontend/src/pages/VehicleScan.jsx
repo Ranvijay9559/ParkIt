@@ -1,0 +1,481 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import API from "../api/axios";
+
+function VehicleScan() {
+  const navigate = useNavigate();
+
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  const [stream, setStream] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+
+  const [vehicleNumber, setVehicleNumber] = useState("");
+  const [vehicleType, setVehicleType] = useState("CAR");
+
+  const [cameraStarted, setCameraStarted] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    return () => {
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [stream]);
+
+  const startCamera = async () => {
+    setError("");
+    setSuccess("");
+
+    try {
+      if (!navigator.mediaDevices) {
+        setError("Camera is not supported by this browser.");
+        return;
+      }
+
+      const mediaStream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment"
+          },
+          audio: false
+        });
+
+      setStream(mediaStream);
+      setCameraStarted(true);
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+    } catch (error) {
+      console.error("Camera error:", error);
+
+      setError(
+        "Unable to access camera. Please allow camera permission."
+      );
+    }
+  };
+
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach((track) => {
+        track.stop();
+      });
+    }
+
+    setStream(null);
+    setCameraStarted(false);
+  };
+
+  const captureImage = async () => {
+    if (!videoRef.current || !canvasRef.current) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+
+    context.drawImage(
+      video,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+
+    const image = canvas.toDataURL("image/jpeg", 0.9);
+
+    setCapturedImage(image);
+
+    stopCamera();
+
+    await scanVehicle(image);
+  };
+
+  const scanVehicle = async (image) => {
+    try {
+      setScanning(true);
+      setError("");
+      setSuccess("");
+
+      const response = await API.post("/anpr/scan", {
+        image
+      });
+
+      const detectedNumber =
+        response.data.vehicleNumber;
+
+      if (detectedNumber) {
+        setVehicleNumber(
+          detectedNumber.toUpperCase()
+        );
+
+        setSuccess(
+          `Vehicle number detected: ${detectedNumber}`
+        );
+      } else {
+        setError(
+          "Vehicle number could not be detected. Please enter it manually."
+        );
+      }
+    } catch (error) {
+      console.error("ANPR scan failed:", error);
+
+      setError(
+        error.response?.data?.message ||
+          "Vehicle number detection failed. Please enter the number manually."
+      );
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const retakeImage = () => {
+    setCapturedImage(null);
+    setVehicleNumber("");
+    setError("");
+    setSuccess("");
+
+    startCamera();
+  };
+
+  const registerVehicle = async () => {
+    setError("");
+    setSuccess("");
+
+    if (!vehicleNumber.trim()) {
+      setError("Please enter the vehicle number.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await API.post("/vehicles", {
+        vehicleNumber:
+          vehicleNumber.trim().toUpperCase(),
+        vehicleType
+      });
+
+      setSuccess(
+        "Vehicle registered successfully."
+      );
+
+      setTimeout(() => {
+        navigate("/vehicles");
+      }, 1000);
+    } catch (error) {
+      console.error(
+        "Vehicle registration failed:",
+        error
+      );
+
+      setError(
+        error.response?.data?.message ||
+          "Vehicle registration failed."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100">
+      {/* Navbar */}
+
+      <nav className="bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="h-16 flex items-center justify-between">
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2"
+            >
+              <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">
+                P
+              </div>
+
+              <span className="text-xl font-bold text-slate-900">
+                Park<span className="text-blue-600">
+                  It
+                </span>
+              </span>
+            </Link>
+
+            <Link
+              to="/vehicles"
+              className="text-sm font-medium text-slate-600 hover:text-blue-600"
+            >
+              My Vehicles
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main */}
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900">
+            Scan Vehicle
+          </h1>
+
+          <p className="mt-2 text-slate-500">
+            Capture the vehicle number plate and let
+            ParkIt detect the registration number.
+          </p>
+        </div>
+
+        {/* Error */}
+
+        {error && (
+          <div className="mb-6 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {/* Success */}
+
+        {success && (
+          <div className="mb-6 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+            {success}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Camera Section */}
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-slate-200">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Vehicle Camera
+              </h2>
+
+              <p className="text-sm text-slate-500 mt-1">
+                Position the number plate inside the
+                highlighted area.
+              </p>
+            </div>
+
+            <div className="p-6">
+              {/* Camera preview */}
+
+              <div className="relative bg-black rounded-xl overflow-hidden aspect-video flex items-center justify-center">
+                {!cameraStarted &&
+                  !capturedImage && (
+                    <div className="text-center text-white px-6">
+                      <div className="text-4xl mb-3">
+                        📷
+                      </div>
+
+                      <p className="text-sm text-slate-300">
+                        Camera is not active
+                      </p>
+                    </div>
+                  )}
+
+                {cameraStarted && (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                )}
+
+                {capturedImage && (
+                  <img
+                    src={capturedImage}
+                    alt="Captured vehicle"
+                    className="w-full h-full object-cover"
+                  />
+                )}
+
+                {cameraStarted && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-4/5 h-1/3 border-2 border-white rounded-lg">
+                    </div>
+                  </div>
+                )}
+
+                {scanning && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto">
+                      </div>
+
+                      <p className="mt-4 font-medium">
+                        Detecting vehicle number...
+                      </p>
+
+                      <p className="mt-1 text-sm text-slate-300">
+                        Please wait
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Canvas */}
+
+              <canvas
+                ref={canvasRef}
+                className="hidden"
+              />
+
+              {/* Camera buttons */}
+
+              <div className="mt-5 flex gap-3">
+                {!cameraStarted &&
+                  !capturedImage && (
+                    <button
+                      onClick={startCamera}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg transition"
+                    >
+                      Start Camera
+                    </button>
+                  )}
+
+                {cameraStarted && (
+                  <>
+                    <button
+                      onClick={captureImage}
+                      disabled={scanning}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-3 rounded-lg transition"
+                    >
+                      {scanning
+                        ? "Scanning..."
+                        : "Capture & Scan"}
+                    </button>
+
+                    <button
+                      onClick={stopCamera}
+                      className="px-5 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition"
+                    >
+                      Stop
+                    </button>
+                  </>
+                )}
+
+                {capturedImage &&
+                  !scanning && (
+                    <button
+                      onClick={retakeImage}
+                      className="flex-1 border border-slate-300 text-slate-700 font-medium py-3 rounded-lg hover:bg-slate-50 transition"
+                    >
+                      Retake
+                    </button>
+                  )}
+              </div>
+            </div>
+          </div>
+
+          {/* Vehicle Details */}
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="p-6 border-b border-slate-200">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Vehicle Details
+              </h2>
+
+              <p className="text-sm text-slate-500 mt-1">
+                Verify the detected information before
+                registration.
+              </p>
+            </div>
+
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Detected Vehicle Number
+              </label>
+
+              <input
+                type="text"
+                value={vehicleNumber}
+                onChange={(e) =>
+                  setVehicleNumber(
+                    e.target.value.toUpperCase()
+                  )
+                }
+                placeholder="e.g. PB10AB1234"
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+              />
+
+              <p className="text-xs text-slate-500 mt-2">
+                You can correct the detected number
+                before registering.
+              </p>
+
+              <label className="block text-sm font-medium text-slate-700 mt-6 mb-2">
+                Vehicle Type
+              </label>
+
+              <select
+                value={vehicleType}
+                onChange={(e) =>
+                  setVehicleType(e.target.value)
+                }
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="CAR">
+                  Car
+                </option>
+
+                <option value="BIKE">
+                  Bike
+                </option>
+
+                <option value="SUV">
+                  SUV
+                </option>
+
+                <option value="TRUCK">
+                  Truck
+                </option>
+
+                <option value="OTHER">
+                  Other
+                </option>
+              </select>
+
+              <button
+                onClick={registerVehicle}
+                disabled={
+                  loading ||
+                  scanning ||
+                  !vehicleNumber.trim()
+                }
+                className="w-full mt-8 bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-medium py-3 rounded-lg transition"
+              >
+                {loading
+                  ? "Registering..."
+                  : "Register Vehicle"}
+              </button>
+
+              <Link
+                to="/vehicles"
+                className="block text-center mt-4 text-sm text-blue-600 hover:text-blue-700"
+              >
+                Back to My Vehicles
+              </Link>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default VehicleScan;
