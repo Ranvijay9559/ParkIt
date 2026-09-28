@@ -7,6 +7,7 @@ function VehicleScan() {
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const previewRef = useRef(null);
 
   const [stream, setStream] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
@@ -99,24 +100,35 @@ function VehicleScan() {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
+    const preview = previewRef.current;
 
     if (!video.videoWidth || !video.videoHeight) {
       setError("The camera is still starting. Please wait a moment and try again.");
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    if (!preview) return;
+
+    // Crop to the guide so OCR receives the plate instead of the full frame.
+    // Compensate for the video element's object-cover crop on mobile cameras.
+    const frameWidth = preview.clientWidth;
+    const frameHeight = preview.clientHeight;
+    const visibleWidth = Math.min(video.videoWidth, video.videoHeight * frameWidth / frameHeight);
+    const visibleHeight = Math.min(video.videoHeight, video.videoWidth * frameHeight / frameWidth);
+    const visibleLeft = (video.videoWidth - visibleWidth) / 2;
+    const visibleTop = (video.videoHeight - visibleHeight) / 2;
+    const cropX = visibleLeft + visibleWidth * 0.1;
+    const cropY = visibleTop + visibleHeight / 3;
+    const cropWidth = visibleWidth * 0.8;
+    const cropHeight = visibleHeight / 3;
+
+    canvas.width = Math.round(cropWidth);
+    canvas.height = Math.round(cropHeight);
 
     const context = canvas.getContext("2d");
-
-    context.drawImage(
-      video,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+    context.filter = "grayscale(1) contrast(1.35)";
+    context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+    context.filter = "none";
 
     const image = canvas.toDataURL("image/jpeg", 0.9);
 
@@ -156,9 +168,11 @@ function VehicleScan() {
     } catch (error) {
       console.error("ANPR scan failed:", error);
 
+      const rawText = error.response?.data?.rawText?.trim();
       setError(
-        error.response?.data?.message ||
-          "Vehicle number detection failed. Please enter the number manually."
+        rawText
+          ? `Could not identify a plate. OCR read: ${rawText || "no text"}. Center the plate in the guide and try again.`
+          : error.response?.data?.message || "Vehicle number detection failed. Please enter the number manually."
       );
     } finally {
       setScanning(false);
@@ -286,15 +300,14 @@ function VehicleScan() {
               </h2>
 
               <p className="text-sm text-slate-500 mt-1">
-                Position the number plate inside the
-                highlighted area.
+                Center the full number plate inside the guide and hold the phone steady.
               </p>
             </div>
 
             <div className="p-6">
               {/* Camera preview */}
 
-              <div className="relative bg-black rounded-xl overflow-hidden aspect-video flex items-center justify-center">
+              <div ref={previewRef} className="relative bg-black rounded-xl overflow-hidden aspect-video flex items-center justify-center">
                 {!cameraStarted &&
                   !capturedImage && (
                     <div className="text-center text-white px-6">

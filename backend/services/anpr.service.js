@@ -22,9 +22,15 @@ const detectVehicleNumber = async (image) => {
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, "");
 
+    // Accept common Indian registration formats, including BH-series plates.
+    // OCR output often contains spaces or punctuation, removed above.
+    const vehicleNumber = cleanedText.match(
+      /(?:[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{1,4}|\d{2}BH\d{4}[A-Z]{1,2})/
+    )?.[0] || "";
+
     return {
       rawText,
-      vehicleNumber: cleanedText
+      vehicleNumber
     };
   } finally {
     await worker.terminate();
