@@ -12,6 +12,7 @@ const scanVehicle = async (req, res) => {
       });
     }
 
+    console.log(`[ANPR] Scan request received (${Math.round(image.length * 0.75 / 1024)} KB image payload)`);
     const result = await detectVehicleNumber(image);
 
     if (!result.vehicleNumber) {
