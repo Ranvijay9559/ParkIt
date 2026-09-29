@@ -145,9 +145,7 @@ function VehicleScan() {
       setError("");
       setSuccess("");
 
-      const response = await API.post("/anpr/scan", {
-        image
-      });
+      const response = await API.post("/anpr/scan", { image }, { timeout: 65000 });
 
       const detectedNumber =
         response.data.vehicleNumber;
@@ -172,6 +170,10 @@ function VehicleScan() {
       setError(
         rawText
           ? `Could not identify a plate. OCR read: ${rawText || "no text"}. Center the plate in the guide and try again.`
+          : error.code === "ECONNABORTED" || error.response?.status === 504
+            ? "Plate scanning took too long. Please retake the photo or enter the number manually."
+            : !error.response
+              ? "The scan server did not respond. Please try once more or enter the number manually."
           : error.response?.data?.message || "Vehicle number detection failed. Please enter the number manually."
       );
     } finally {

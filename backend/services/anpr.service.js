@@ -1,19 +1,35 @@
 const { createWorker } = require("tesseract.js");
 
-const detectVehicleNumber = async (image) => {
+let workerPromise;
+let scanQueue = Promise.resolve();
+
+const getWorker = () => {
+  if (!workerPromise) {
+    workerPromise = createWorker("eng")
+      .then(async (worker) => {
+        await worker.setParameters({
+          tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+          tessedit_pageseg_mode: "7"
+        });
+        return worker;
+      })
+      .catch((error) => {
+        workerPromise = null;
+        throw error;
+      });
+  }
+
+  return workerPromise;
+};
+
+const runScan = async (image) => {
   if (!image) {
     throw new Error("Vehicle image is required");
   }
 
-  const worker = await createWorker("eng");
+  const worker = await getWorker();
 
   try {
-    await worker.setParameters({
-      tessedit_char_whitelist:
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-      tessedit_pageseg_mode: "7"
-    });
-
     const result = await worker.recognize(image);
 
     const rawText = result.data.text || "";
@@ -32,9 +48,19 @@ const detectVehicleNumber = async (image) => {
       rawText,
       vehicleNumber
     };
-  } finally {
-    await worker.terminate();
+  } catch (error) {
+    // Discard a worker that failed so the next request can initialize a clean one.
+    workerPromise = null;
+    await worker.terminate().catch(() => {});
+    throw error;
   }
+};
+
+const detectVehicleNumber = (image) => {
+  // A single OCR worker handles scans sequentially within a warm server instance.
+  const scan = scanQueue.then(() => runScan(image));
+  scanQueue = scan.catch(() => {});
+  return scan;
 };
 
 module.exports = {
