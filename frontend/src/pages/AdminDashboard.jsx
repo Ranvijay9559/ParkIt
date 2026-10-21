@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { io } from "socket.io-client";
 import API from "../api/axios";
 
 function AdminDashboard() {
@@ -40,11 +39,8 @@ function AdminDashboard() {
       }
     };
     loadDashboard();
-    const socketUrl = (API.defaults.baseURL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
-    const socket = io(socketUrl, { reconnection: true, timeout: 4000 });
-    socket.on("parking:availability", loadDashboard);
     const refresh = setInterval(loadDashboard, 15000);
-    return () => { clearInterval(refresh); socket.disconnect(); };
+    return () => { clearInterval(refresh); };
   }, [navigate]);
 
   const handleLogout = () => {

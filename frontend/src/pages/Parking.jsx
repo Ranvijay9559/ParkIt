@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { io } from "socket.io-client";
 import API from "../api/axios";
+import { subscribeToParkingUpdates } from "../services/parking-realtime";
 
 function Parking() {
   const isAdmin = (() => {
@@ -33,34 +33,36 @@ function Parking() {
   }, []);
 
   useEffect(() => {
-    const socket = io(API.defaults.baseURL.replace(/\/api\/?$/, ""));
     let active = true;
-    socket.on("parking:availability", ({ lotId }) => {
-      API.get("/parking/lots").then((response) => {
+    const refreshParking = async () => {
+      try {
+        const response = await API.get("/parking/lots");
         if (!active) return;
         const lots = response.data.parkingLots || [];
         setParkingLots(lots);
-        if (selectedLot?._id === lotId) {
-          const updatedLot = lots.find((lot) => lot._id === lotId);
-          if (updatedLot) setSelectedLot(updatedLot);
-          return Promise.all([
-            API.get(`/parking/lots/${lotId}/slots`),
-            API.get(`/parking/lots/${lotId}/availability`)
-          ]).then(([slotResponse, availabilityResponse]) => {
-            if (!active) return;
-            setSlots(slotResponse.data.slots || []);
-            setAvailability(availabilityResponse.data);
-          });
-        }
-      }).catch((error) => {
+        if (!selectedLot?._id) return;
+
+        const updatedLot = lots.find((lot) => lot._id === selectedLot._id);
+        if (updatedLot) setSelectedLot(updatedLot);
+        const [slotResponse, availabilityResponse] = await Promise.all([
+          API.get(`/parking/lots/${selectedLot._id}/slots`),
+          API.get(`/parking/lots/${selectedLot._id}/availability`)
+        ]);
+        if (!active) return;
+        setSlots(slotResponse.data.slots || []);
+        setAvailability(availabilityResponse.data);
+      } catch (error) {
         if (active) setError(error.response?.data?.message || "Could not refresh parking availability.");
-      });
-    });
+      }
+    };
+    const unsubscribe = subscribeToParkingUpdates(refreshParking);
+    const poll = setInterval(refreshParking, 10000);
     return () => {
       active = false;
-      socket.disconnect();
+      clearInterval(poll);
+      unsubscribe();
     };
-  }, [selectedLot]);
+  }, [selectedLot?._id]);
 
   const viewParkingLot = async (lot) => {
     try {

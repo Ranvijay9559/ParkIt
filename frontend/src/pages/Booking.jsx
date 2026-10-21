@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { io } from "socket.io-client";
 import API from "../api/axios";
+import { subscribeToParkingUpdates } from "../services/parking-realtime";
 
 const getNextMinuteLocal = () => {
   const nextMinute = new Date();
@@ -70,8 +70,6 @@ function Booking() {
         // Keep the last known view when a background refresh briefly fails.
       }
     };
-    const socketUrl = (API.defaults.baseURL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
-    const socket = io(socketUrl, { reconnection: true, timeout: 4000 });
     const refreshForLot = (event) => {
       refreshLots();
       if (selectedLot?._id && event?.lotId === selectedLot._id) {
@@ -80,7 +78,7 @@ function Booking() {
         }).catch(() => {});
       }
     };
-    socket.on("parking:availability", refreshForLot);
+    const unsubscribe = subscribeToParkingUpdates(refreshForLot);
     const poll = setInterval(() => {
       refreshLots();
       if (selectedLot?._id) {
@@ -89,7 +87,7 @@ function Booking() {
         }).catch(() => {});
       }
     }, 10000);
-    return () => { active = false; clearInterval(poll); socket.off("parking:availability", refreshForLot); socket.disconnect(); };
+    return () => { active = false; clearInterval(poll); unsubscribe(); };
   }, [selectedLot?._id]);
 
   useEffect(() => {
