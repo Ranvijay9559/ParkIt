@@ -52,6 +52,11 @@ const parkingSessionSchema = new mongoose.Schema(
       default: "ACTIVE"
     },
 
+    isSimulated: {
+      type: Boolean,
+      default: false
+    },
+
     baseAmount: {
       type: Number,
       default: 0

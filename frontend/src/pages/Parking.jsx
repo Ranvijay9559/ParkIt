@@ -4,6 +4,14 @@ import { io } from "socket.io-client";
 import API from "../api/axios";
 
 function Parking() {
+  const isAdmin = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null")?.role === "ADMIN";
+    } catch {
+      return false;
+    }
+  })();
+  const homePath = isAdmin ? "/admin" : "/dashboard";
   const [parkingLots, setParkingLots] = useState([]);
   const [selectedLot, setSelectedLot] = useState(null);
   const [slots, setSlots] = useState([]);
@@ -130,7 +138,7 @@ function Parking() {
           <div className="h-16 flex items-center justify-between">
 
             <Link
-              to="/dashboard"
+              to={homePath}
               className="flex items-center gap-2"
             >
               <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold">
@@ -143,7 +151,7 @@ function Parking() {
             </Link>
 
             <Link
-              to="/dashboard"
+              to={homePath}
               className="text-sm font-medium text-slate-600 hover:text-blue-600"
             >
               ← Dashboard
@@ -458,10 +466,10 @@ function Parking() {
               <div className="mt-8 flex justify-end">
 
                 <Link
-                  to="/booking"
+                  to={isAdmin ? `/admin/parking?lotId=${selectedLot._id}` : "/booking"}
                   className="px-6 py-3 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
                 >
-                  Book a Parking Slot
+                  {isAdmin ? "Manage this parking lot" : "Book a Parking Slot"}
                 </Link>
 
               </div>

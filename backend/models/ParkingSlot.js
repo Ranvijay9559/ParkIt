@@ -26,8 +26,15 @@ const parkingSlotSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["AVAILABLE", "RESERVED", "OCCUPIED", "MAINTENANCE"],
+      enum: ["AVAILABLE", "RESERVED", "OCCUPIED", "MAINTENANCE", "DECOMMISSIONED"],
       default: "AVAILABLE"
+    },
+
+    decommissionedAt: Date,
+
+    decommissionedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
     },
 
     distanceFromEntry: {

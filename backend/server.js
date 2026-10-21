@@ -13,6 +13,7 @@ const pricingRoutes = require("./routes/pricing.routes");
 const sessionRoutes = require("./routes/session.routes");
 const anprRoutes = require("./routes/anpr.routes");
 const { setSocketServer } = require("./services/realtime.service");
+const { expireMissedReservations } = require("./services/reservation-expiry.service");
 
 dotenv.config();
 
@@ -67,6 +68,11 @@ if (require.main === module) {
 
   connectDB()
     .then(() => {
+      expireMissedReservations().catch((error) => console.error("Reservation expiry check failed:", error.message));
+      const reservationExpiryWorker = setInterval(() => {
+        expireMissedReservations().catch((error) => console.error("Reservation expiry check failed:", error.message));
+      }, 30 * 1000);
+      reservationExpiryWorker.unref();
       server.listen(PORT, () => {
         console.log(`ParkIt backend running on port ${PORT}`);
       });

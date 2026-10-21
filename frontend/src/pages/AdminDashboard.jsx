@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import API from "../api/axios";
 
 function AdminDashboard() {
@@ -12,12 +13,9 @@ function AdminDashboard() {
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        setLoading(true);
-        setError("");
-
         const response = await API.get("/parking/lots");
-
         setLots(response.data.parkingLots || []);
+        setError("");
       } catch (error) {
         console.error("Admin dashboard error:", error);
 
@@ -42,6 +40,11 @@ function AdminDashboard() {
       }
     };
     loadDashboard();
+    const socketUrl = (API.defaults.baseURL || "http://localhost:5000/api").replace(/\/api\/?$/, "");
+    const socket = io(socketUrl, { reconnection: true, timeout: 4000 });
+    socket.on("parking:availability", loadDashboard);
+    const refresh = setInterval(loadDashboard, 15000);
+    return () => { clearInterval(refresh); socket.disconnect(); };
   }, [navigate]);
 
   const handleLogout = () => {
@@ -63,8 +66,8 @@ function AdminDashboard() {
     0
   );
 
-  const occupiedSlots =
-    totalSlots - availableSlots;
+  const occupiedSlots = lots.reduce((total, lot) => total + (lot.occupiedSlots || 0), 0);
+  const reservedSlots = lots.reduce((total, lot) => total + (lot.reservedSlots || 0), 0);
 
   const occupancyPercentage =
     totalSlots > 0
@@ -148,7 +151,7 @@ function AdminDashboard() {
 
         {/* Statistics */}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
           {/* Parking Lots */}
 
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
@@ -220,6 +223,14 @@ function AdminDashboard() {
               </div>
             </div>
           </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+            <p className="text-sm text-slate-500">Reserved Slots</p>
+            <div className="flex items-end justify-between mt-2">
+              <p className="text-3xl font-bold text-amber-600">{reservedSlots}</p>
+              <div className="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 font-bold">R</div>
+            </div>
+          </div>
         </div>
 
         {/* Occupancy */}
@@ -274,7 +285,9 @@ function AdminDashboard() {
                 Current status of all parking lots
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
+              <Link to="/admin/entry-scan" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Record entry</Link>
+              <Link to="/admin/exit-scan" className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700">Record exit</Link>
               <Link to="/admin/parking" className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">Manage parking</Link>
               <Link to="/admin/pricing" className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50">Manage pricing</Link>
             </div>
@@ -301,8 +314,7 @@ function AdminDashboard() {
                 const lotOccupancy =
                   lot.totalSlots > 0
                     ? Math.round(
-                        ((lot.totalSlots -
-                          lot.availableSlots) /
+                          ((lot.occupiedSlots + lot.reservedSlots) /
                           lot.totalSlots) *
                           100
                       )
@@ -362,8 +374,7 @@ function AdminDashboard() {
                         </p>
 
                         <p className="text-lg font-bold text-orange-600 mt-1">
-                          {lot.totalSlots -
-                            lot.availableSlots}
+                          {(lot.occupiedSlots || 0) + (lot.reservedSlots || 0)}
                         </p>
                       </div>
                     </div>
@@ -390,10 +401,10 @@ function AdminDashboard() {
                     </div>
 
                     <Link
-                      to={`/parking`}
+                      to={`/admin/parking?lotId=${lot._id}`}
                       className="block text-center mt-5 px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
                     >
-                      View Slots
+                      Manage lot & slots
                     </Link>
                   </div>
                 );

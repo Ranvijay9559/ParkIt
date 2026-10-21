@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import API from "../api/axios";
 
 function AdminParking() {
+  const [searchParams] = useSearchParams();
+  const requestedLotId = searchParams.get("lotId");
   const [lots, setLots] = useState([]);
   const [selectedLotId, setSelectedLotId] = useState("");
   const [slots, setSlots] = useState([]);
@@ -26,6 +28,7 @@ function AdminParking() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [demoOccupancy, setDemoOccupancy] = useState(65);
 
   const loadLots = useCallback(async () => {
     try {
@@ -34,7 +37,7 @@ function AdminParking() {
       const parkingLots = response.data.parkingLots || [];
       setLots(parkingLots);
 
-      if (parkingLots.length > 0) setSelectedLotId((current) => current || parkingLots[0]._id);
+      if (parkingLots.length > 0) setSelectedLotId((current) => requestedLotId || current || parkingLots[0]._id);
     } catch (error) {
       console.error("Failed to load parking lots:", error);
 
@@ -43,15 +46,13 @@ function AdminParking() {
           "Failed to load parking lots."
       );
     }
-  }, []);
+  }, [requestedLotId]);
 
   const loadSlots = useCallback(async (lotId) => {
     try {
       setSlotsLoading(true);
 
-      const response = await API.get(
-        `/parking/lots/${lotId}/slots`
-      );
+      const response = await API.get(`/parking/lots/${lotId}/manage-slots`);
 
       setSlots(response.data.slots || []);
     } catch (error) {
@@ -68,28 +69,25 @@ function AdminParking() {
 
   useEffect(() => {
     let active = true;
-    API.get("/parking/lots")
-      .then((response) => {
-        if (!active) return;
-        const parkingLots = response.data.parkingLots || [];
-        setLots(parkingLots);
-        if (parkingLots.length > 0) setSelectedLotId((current) => current || parkingLots[0]._id);
-      })
-      .catch((error) => {
-        if (active) setError(error.response?.data?.message || "Failed to load parking lots.");
-      });
+    API.get("/parking/lots").then((response) => {
+      if (!active) return;
+      const parkingLots = response.data.parkingLots || [];
+      setLots(parkingLots);
+      if (parkingLots.length > 0) setSelectedLotId((current) => requestedLotId || current || parkingLots[0]._id);
+    }).catch((requestError) => {
+      if (active) setError(requestError.response?.data?.message || "Failed to load parking lots.");
+    });
     return () => { active = false; };
-  }, []);
+  }, [requestedLotId]);
 
   useEffect(() => {
     if (!selectedLotId) return undefined;
     let active = true;
-    API.get(`/parking/lots/${selectedLotId}/slots`)
-      .then((response) => { if (active) setSlots(response.data.slots || []); })
-      .catch((error) => {
-        if (active) setError(error.response?.data?.message || "Failed to load parking slots.");
-      })
-      .finally(() => { if (active) setSlotsLoading(false); });
+    API.get(`/parking/lots/${selectedLotId}/manage-slots`).then((response) => {
+      if (active) setSlots(response.data.slots || []);
+    }).catch((requestError) => {
+      if (active) setError(requestError.response?.data?.message || "Failed to load parking slots.");
+    }).finally(() => { if (active) setSlotsLoading(false); });
     return () => { active = false; };
   }, [selectedLotId]);
 
@@ -238,6 +236,45 @@ function AdminParking() {
     (lot) => lot._id === selectedLotId
   );
 
+  const generateDemoLot = async () => {
+    setError(""); setSuccess(""); setLoading(true);
+    try {
+      const response = await API.post("/parking/demo-lots", { capacity: 12 });
+      const lot = response.data.parkingLot;
+      setSuccess(`Generated ${lot.name} with ${response.data.slotsCreated} demo slots.`);
+      await loadLots();
+      setSelectedLotId(lot._id);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not generate demo lot.");
+    } finally { setLoading(false); }
+  };
+
+  const simulateLot = async () => {
+    if (!selectedLotId) return setError("Select a lot to simulate.");
+    setError(""); setSuccess(""); setLoading(true);
+    try {
+      const response = await API.post(`/parking/lots/${selectedLotId}/simulate`, { occupancyPercent: Number(demoOccupancy) });
+      setSuccess(`${response.data.message}: ${response.data.simulatedEntries} demo arrivals and ${response.data.simulatedCheckouts} demo checkouts. ${response.data.availability.occupied}/${response.data.availability.total} occupied.`);
+      await loadSlots(selectedLotId); await loadLots();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not simulate occupancy.");
+    } finally { setLoading(false); }
+  };
+
+  const removeSlot = async (slot) => {
+    const confirmed = window.confirm(`Remove slot ${slot.slotNumber} from service? It will disappear from customer availability, while historical booking records remain available.`);
+    if (!confirmed) return;
+    setError(""); setSuccess(""); setLoading(true);
+    try {
+      const response = await API.delete(`/parking/slots/${slot._id}`);
+      setSuccess(response.data.message || `Slot ${slot.slotNumber} removed from service.`);
+      await loadSlots(selectedLotId);
+      await loadLots();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not remove this slot.");
+    } finally { setLoading(false); }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100">
       {/* Navbar */}
@@ -303,6 +340,22 @@ function AdminParking() {
             {success}
           </div>
         )}
+
+        <section className="mb-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Demo lot simulator</h2>
+              <p className="text-sm text-slate-500 mt-1">Generate sample capacity, then reconcile arrivals and departures against real demo sessions.</p>
+            </div>
+            <button onClick={generateDemoLot} disabled={loading} className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">Generate 12-slot demo lot</button>
+          </div>
+          <div className="mt-5 flex flex-col sm:flex-row sm:items-center gap-4">
+            <label className="text-sm text-slate-700">Target occupancy: <strong>{demoOccupancy}%</strong>
+              <input aria-label="Target demo occupancy" type="range" min="0" max="100" step="10" value={demoOccupancy} onChange={(event) => setDemoOccupancy(event.target.value)} className="block w-64 mt-2" />
+            </label>
+            <button onClick={simulateLot} disabled={loading || !selectedLotId} className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">Recheck & simulate arrivals / checkouts</button>
+          </div>
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Create Parking Lot */}
@@ -410,9 +463,11 @@ function AdminParking() {
 
                 <select
                   value={selectedLotId}
-                  onChange={(e) =>
-                    setSelectedLotId(e.target.value)
-                  }
+                  onChange={(e) => {
+                    setSlotsLoading(true);
+                    setSlots([]);
+                    setSelectedLotId(e.target.value);
+                  }}
                   className="w-full px-4 py-3 border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">
@@ -623,8 +678,18 @@ function AdminParking() {
                     </p>
 
                     <p className="text-xs font-medium mt-2 text-slate-700">
-                      {slot.status}
+                      {slot.status === "DECOMMISSIONED" ? "REMOVED" : slot.status}
                     </p>
+
+                    {slot.status !== "DECOMMISSIONED" && <button
+                      type="button"
+                      onClick={() => removeSlot(slot)}
+                      disabled={loading || !["AVAILABLE", "MAINTENANCE"].includes(slot.status)}
+                      title={slot.status === "RESERVED" || slot.status === "OCCUPIED" ? "Release the reservation or check out the vehicle before removing this slot." : "Remove this slot from service"}
+                      className="mt-3 w-full rounded-lg border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Remove slot
+                    </button>}
                   </div>
                 ))}
               </div>

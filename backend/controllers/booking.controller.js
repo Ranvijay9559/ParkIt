@@ -2,10 +2,14 @@ const Booking = require("../models/Booking");
 const Vehicle = require("../models/Vehicle");
 const ParkingLot = require("../models/ParkingLot");
 const ParkingSlot = require("../models/ParkingSlot");
+const ParkingSession = require("../models/ParkingSession");
 const { notifyParkingChange } = require("../services/realtime.service");
+const { calculateArrivalGraceMinutes, expireMissedReservations } = require("../services/reservation-expiry.service");
+const { calculateReservationFee } = require("../services/fee.service");
 
 const createBooking = async (req, res) => {
   try {
+    await expireMissedReservations();
     const {
       vehicleId,
       parkingLotId,
@@ -32,7 +36,14 @@ const createBooking = async (req, res) => {
         message: "End time must be after start time"
       });
     }
-
+    if (start.getTime() <= Date.now()) {
+      return res.status(400).json({ message: "Reservation start time must be in the future" });
+    }
+    const reservedMinutes = (end.getTime() - start.getTime()) / 60000;
+    if (reservedMinutes < 30 || reservedMinutes > 120) {
+      return res.status(400).json({ message: "Bookings must be at least 30 minutes and no longer than 2 hours" });
+    }
+    const arrivalGraceMinutes = calculateArrivalGraceMinutes(reservedMinutes);
     // Check vehicle
     const vehicle = await Vehicle.findOne({
       _id: vehicleId,
@@ -44,6 +55,8 @@ const createBooking = async (req, res) => {
         message: "Vehicle not found"
       });
     }
+
+    const reservationFee = await calculateReservationFee(vehicle.vehicleType, start, end);
 
     // Check parking lot
     const parkingLot = await ParkingLot.findById(parkingLotId);
@@ -107,8 +120,7 @@ const createBooking = async (req, res) => {
       });
     }
 
-    const bookingId =
-      `PKT-${Date.now()}`;
+    const bookingId = `PKT-${Date.now()}`;
 
     let booking;
     try {
@@ -121,6 +133,21 @@ const createBooking = async (req, res) => {
         bookingType: "ONLINE",
         startTime: start,
         expectedEndTime: end,
+        arrivalDeadline: new Date(start.getTime() + arrivalGraceMinutes * 60 * 1000),
+        arrivalGraceMinutes,
+        reservationAmount: reservationFee.baseAmount,
+        reservationPaymentStatus: "DEMO_PAID",
+        reservationPaymentReference: `DEMO-${bookingId}`,
+        pricingSnapshot: {
+          baseRate: reservationFee.baseRate,
+          ratePerHour: reservationFee.ratePerHour,
+          extraRatePerHour: reservationFee.extraRatePerHour,
+          exitGracePeriodMinutes: reservationFee.exitGracePeriodMinutes,
+          reservedMinutes: reservationFee.reservedMinutes,
+          billedHours: reservationFee.billedHours
+        },
+        baseAmount: reservationFee.baseAmount,
+        totalAmount: reservationFee.baseAmount,
         status: "CONFIRMED"
       });
     } catch (error) {
@@ -143,7 +170,12 @@ const createBooking = async (req, res) => {
       booking: {
         bookingId: booking.bookingId,
         status: booking.status,
-        parkingSlotId: booking.parkingSlotId
+        parkingSlotId: booking.parkingSlotId,
+        reservationAmount: booking.reservationAmount,
+        reservationPaymentStatus: booking.reservationPaymentStatus,
+        arrivalGraceMinutes: booking.arrivalGraceMinutes,
+        arrivalDeadline: booking.arrivalDeadline,
+        pricingSnapshot: booking.pricingSnapshot
       }
     });
   } catch (error) {
@@ -156,6 +188,7 @@ const createBooking = async (req, res) => {
 
 const getMyBookings = async (req, res) => {
   try {
+    await expireMissedReservations();
     const bookings = await Booking.find({
       userId: req.user.userId
     })
@@ -177,6 +210,7 @@ const getMyBookings = async (req, res) => {
 
 const getBookingById = async (req, res) => {
   try {
+    await expireMissedReservations();
     const booking = await Booking.findOne({
       _id: req.params.id,
       userId: req.user.userId
@@ -204,6 +238,7 @@ const getBookingById = async (req, res) => {
 
 const cancelBooking = async (req, res) => {
   try {
+    await expireMissedReservations();
     const booking = await Booking.findOne({
       _id: req.params.id,
       userId: req.user.userId
@@ -223,7 +258,11 @@ const cancelBooking = async (req, res) => {
 
     const cancelled = await Booking.findOneAndUpdate(
       { _id: booking._id, status: "CONFIRMED" },
-      { $set: { status: "CANCELLED" } },
+      { $set: {
+        status: "CANCELLED",
+        cancellationReason: "CUSTOMER",
+        reservationPaymentStatus: booking.reservationPaymentStatus === "DEMO_PAID" ? "DEMO_REFUNDED" : booking.reservationPaymentStatus
+      } },
       { new: true }
     );
     if (!cancelled) {
@@ -254,9 +293,84 @@ const cancelBooking = async (req, res) => {
   }
 };
 
+const extendActiveBooking = async (req, res) => {
+  try {
+    await expireMissedReservations();
+    const extensionMinutes = Number(req.body.extensionMinutes);
+    if (![30, 60, 90, 120].includes(extensionMinutes)) {
+      return res.status(400).json({ message: "Choose an extension of 30, 60, 90, or 120 minutes" });
+    }
+
+    const booking = await Booking.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    if (booking.status !== "ACTIVE") return res.status(400).json({ message: "Only an active parking session can be extended" });
+
+    const oldEnd = new Date(booking.expectedEndTime);
+    const newEnd = new Date(oldEnd.getTime() + extensionMinutes * 60 * 1000);
+    const conflict = await Booking.findOne({
+      _id: { $ne: booking._id },
+      parkingSlotId: booking.parkingSlotId,
+      status: { $in: ["CONFIRMED", "ACTIVE"] },
+      startTime: { $lt: newEnd },
+      expectedEndTime: { $gt: oldEnd }
+    }).select("bookingId startTime expectedEndTime");
+    if (conflict) {
+      return res.status(409).json({
+        message: `This slot is reserved again at ${conflict.startTime.toLocaleString()}; that extension is unavailable`,
+        nextReservationStart: conflict.startTime
+      });
+    }
+
+    const vehicle = await Vehicle.findById(booking.vehicleId);
+    if (!vehicle) return res.status(404).json({ message: "Vehicle not found" });
+    const quote = await calculateReservationFee(vehicle.vehicleType, booking.startTime, newEnd, booking.pricingSnapshot);
+    const previousReservationAmount = Number(booking.reservationAmount || 0);
+    const additionalAmount = Math.max(0, quote.baseAmount - previousReservationAmount);
+    const updated = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: "ACTIVE", expectedEndTime: oldEnd },
+      {
+        $set: {
+          expectedEndTime: newEnd,
+          reservationAmount: quote.baseAmount,
+          reservationPaymentStatus: "DEMO_PAID",
+          reservationPaymentReference: `${booking.reservationPaymentReference || `DEMO-${booking.bookingId}`}-EXT-${Date.now()}`,
+          baseAmount: quote.baseAmount,
+          totalAmount: quote.baseAmount,
+          pricingSnapshot: {
+            baseRate: quote.baseRate,
+            ratePerHour: quote.ratePerHour,
+            extraRatePerHour: quote.extraRatePerHour,
+            exitGracePeriodMinutes: quote.exitGracePeriodMinutes,
+            reservedMinutes: quote.reservedMinutes,
+            billedHours: quote.billedHours
+          }
+        },
+        $push: { extensions: { minutes: extensionMinutes, fromTime: oldEnd, toTime: newEnd, additionalAmount, paymentStatus: "DEMO_PAID" } }
+      },
+      { new: true }
+    );
+    if (!updated) return res.status(409).json({ message: "Booking changed while extending; refresh and try again" });
+
+    await ParkingSession.updateOne(
+      { bookingId: booking._id, status: "ACTIVE" },
+      { $set: { expectedEndTime: newEnd, baseAmount: quote.baseAmount } }
+    );
+    notifyParkingChange(booking.parkingLotId, "BOOKING_EXTENDED");
+
+    return res.json({
+      message: "Parking time extended",
+      booking: updated,
+      extension: { minutes: extensionMinutes, additionalAmount, paymentStatus: "DEMO_PAID", previousReservationAmount, newReservationAmount: quote.baseAmount }
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Failed to extend parking session", error: error.message });
+  }
+};
+
 module.exports = {
   createBooking,
   getMyBookings,
   getBookingById,
-  cancelBooking
+  cancelBooking,
+  extendActiveBooking
 };
