@@ -21,6 +21,7 @@ const app = express();
 const frontendOrigins = [
   process.env.FRONTEND_URL,
   "https://park-it-blush.vercel.app",
+  "https://park-it-git-main-ranvijay9559s-projects.vercel.app",
   "http://localhost:5173"
 ].filter(Boolean);
 
