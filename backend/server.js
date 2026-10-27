@@ -18,8 +18,13 @@ const { expireMissedReservations } = require("./services/reservation-expiry.serv
 dotenv.config();
 
 const app = express();
+const frontendOrigins = [
+  process.env.FRONTEND_URL,
+  "https://park-it-blush.vercel.app",
+  "http://localhost:5173"
+].filter(Boolean);
 
-app.use(cors());
+app.use(cors({ origin: frontendOrigins }));
 // The camera scan page submits a base64 JPEG, which is larger than Express's
 // small default JSON body limit.
 app.use(express.json({ limit: "5mb" }));
@@ -60,7 +65,7 @@ module.exports = app;
 if (require.main === module) {
   const io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || "http://localhost:5173",
+      origin: frontendOrigins,
       methods: ["GET", "POST", "PATCH"]
     }
   });
