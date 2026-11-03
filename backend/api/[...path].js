@@ -1,4 +1,2 @@
-// Route all unmatched /api/* requests through the Express application.
-// More specific API functions, such as api/cron/expire-reservations.js,
-// keep their own routes.
+// Route /api/* requests through the Express application.
 module.exports = require("../server");

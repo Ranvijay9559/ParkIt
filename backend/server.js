@@ -25,7 +25,6 @@ const frontendOrigins = [
   "http://localhost:5173"
 ].filter(Boolean);
 
-// 1. Setup explicit CORS configuration with preflight caching and authorization parameters
 const corsOptions = {
   origin: frontendOrigins,
   credentials: true,
@@ -35,9 +34,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
-// 2. Intercept and completely answer OPTIONS requests before the database connection fires
-app.options("*", cors(corsOptions));
 
 // The camera scan page submits a base64 JPEG, which is larger than Express's
 // small default JSON body limit.
