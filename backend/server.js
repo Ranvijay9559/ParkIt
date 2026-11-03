@@ -18,22 +18,9 @@ const { expireMissedReservations } = require("./services/reservation-expiry.serv
 dotenv.config();
 
 const app = express();
-const frontendOrigins = [
-  process.env.FRONTEND_URL,
-  "https://park-it-blush.vercel.app",
-  "https://park-it-git-main-ranvijay9559s-projects.vercel.app",
-  "http://localhost:5173"
-].filter(Boolean);
-
-const corsOptions = {
-  origin: frontendOrigins,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Requested-With", "Accept"],
-  optionsSuccessStatus: 200
-};
-
-app.use(cors(corsOptions));
+// Allow browser requests from any origin. The frontend sends JWTs in the
+// Authorization header, so cross-origin cookies are not required.
+app.use(cors());
 
 // The camera scan page submits a base64 JPEG, which is larger than Express's
 // small default JSON body limit.
@@ -75,9 +62,7 @@ module.exports = app;
 if (require.main === module) {
   const io = new Server(server, {
     cors: {
-      origin: frontendOrigins,
-      methods: ["GET", "POST", "PATCH"],
-      credentials: true
+      origin: "*"
     }
   }); 
   setSocketServer(io);
