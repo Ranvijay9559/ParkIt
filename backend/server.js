@@ -25,7 +25,20 @@ const frontendOrigins = [
   "http://localhost:5173"
 ].filter(Boolean);
 
-app.use(cors({ origin: frontendOrigins }));
+// 1. Setup explicit CORS configuration with preflight caching and authorization parameters
+const corsOptions = {
+  origin: frontendOrigins,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Requested-With", "Accept"],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// 2. Intercept and completely answer OPTIONS requests before the database connection fires
+app.options("*", cors(corsOptions));
+
 // The camera scan page submits a base64 JPEG, which is larger than Express's
 // small default JSON body limit.
 app.use(express.json({ limit: "5mb" }));
@@ -67,7 +80,8 @@ if (require.main === module) {
   const io = new Server(server, {
     cors: {
       origin: frontendOrigins,
-      methods: ["GET", "POST", "PATCH"]
+      methods: ["GET", "POST", "PATCH"],
+      credentials: true
     }
   }); 
   setSocketServer(io);
