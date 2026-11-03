@@ -69,7 +69,7 @@ if (require.main === module) {
       origin: frontendOrigins,
       methods: ["GET", "POST", "PATCH"]
     }
-  });
+  }); 
   setSocketServer(io);
 
   connectDB()
